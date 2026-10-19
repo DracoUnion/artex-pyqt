@@ -1,12 +1,12 @@
 """ARTEX Standalone 桌面应用入口。
 
-职责：起内嵌 FastAPI 后端（:8787）→ 主窗口 → 登录/首密设置 → 主界面。
+职责：直接装配后端 services（进程内，无 HTTP 服务）→ 主窗口 → 登录/首密设置 → 主界面。
+不再启动 uvicorn / FastAPI。
 """
 from __future__ import annotations
 
 import os
 import sys
-import threading
 from pathlib import Path
 
 
@@ -27,15 +27,6 @@ def skills_dir() -> Path:
     return d
 
 
-def _start_backend(data_dir: str, skills: str):
-    """后台线程里启动 uvicorn。"""
-    import uvicorn
-    from app.backend.server import create_app
-
-    app = create_app(data_dir, skills)
-    uvicorn.run(app, host="127.0.0.1", port=8787, log_level="warning", access_log=False)
-
-
 def main() -> None:
     if sys.platform.startswith("win"):
         # 修复 Windows 高 DPI 模糊
@@ -44,31 +35,23 @@ def main() -> None:
             windll.shcore.SetProcessDpiAwareness(1)
         except Exception:
             pass
-    data = str(app_data_dir())
-    skills = str(skills_dir())
-    thread = threading.Thread(target=_start_backend, args=(data, skills), daemon=True)
-    thread.start()
 
-    # 等后端就绪
-    import time
-    import requests
-    for _ in range(60):
-        try:
-            r = requests.get("http://127.0.0.1:8787/api/health", timeout=0.5)
-            if r.status_code == 200:
-                break
-        except Exception:
-            pass
-        time.sleep(0.25)
+    from app.backend.gateway import Gateway
+    from app.ui.api_client import ApiClient
+
+    gateway = Gateway(str(app_data_dir()), str(skills_dir()))
+    client = ApiClient(gateway)
 
     from PySide6.QtWidgets import QApplication
     from app.ui.app import ArtexApplication
 
     app = QApplication(sys.argv)
     app.setApplicationName("ARTEX")
-    window = ArtexApplication("http://127.0.0.1:8787")
+    window = ArtexApplication(client)
     window.show()
-    sys.exit(app.exec())
+    code = app.exec()
+    gateway.close()
+    sys.exit(code)
 
 
 if __name__ == "__main__":

@@ -132,9 +132,9 @@ class LoginDialog(QDialog):
 class ArtexApplication(QMainWindow):
     """主窗口：侧边栏 + 页面容器。"""
 
-    def __init__(self, base_url: str, skip_auth: bool = False, token: Optional[str] = None):
+    def __init__(self, client, skip_auth: bool = False, token: Optional[str] = None):
         super().__init__()
-        self.client = ApiClient(base_url)
+        self.client = client
         self.setWindowTitle("ARTEX — AI 自主渗透测试")
         self.resize(1440, 900)
 

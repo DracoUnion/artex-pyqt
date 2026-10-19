@@ -147,7 +147,7 @@ class ExplorationService:
             marks = ",".join("?" * len(ids))
             edge_rows = self.db.query(
                 f"SELECT * FROM exploration_edges WHERE exploration_id=? AND (src_id IN ({marks}) OR dst_id IN ({marks}))",
-                tuple([exploration_id] + ids),
+                tuple([exploration_id] + ids + ids),
             )
             neighbor_ids = set(ids)
             for e in edge_rows:

@@ -1,24 +1,28 @@
 # ARTEX Standalone（PyQt 桌面版）
 
-用 **PySide6** 重写的 ARTEX 桌面客户端，配套 **FastAPI + SQLite** 重写的后端，
+用 **PySide6** 重写的 ARTEX 桌面客户端，配套 **SQLite 后端 services（进程内直连）**，
 替代原「Go 后端 + Next.js 前端」架构。保留完整功能面：双图探索引擎、
 任务控制台、人在环路对话、流量录制、拦截审批、系统管理等。
+
+PyQt 直接调用后端 services 类（`app/backend/gateway.py` 进程内分发），
+不再启动 HTTP 服务，无 FastAPI / uvicorn 依赖。
 
 ## 架构
 
 ```
 standalone/
-├── main.py               # 入口：内嵌启动后端(:8787) + Qt 主窗口
+├── main.py               # 入口：装配后端 services + Qt 主窗口
 ├── requirements.txt
 ├── app/
-│   ├── backend/          # FastAPI + SQLite（对应原 server/）
+│   ├── backend/          # SQLite services（对应原 server/）
 │   │   ├── schema.sql    # 从 PostgreSQL 双图 schema 移植
 │   │   ├── engine.py     # planner/worker 双图闭环（LLM 或演示模式）
-│   │   ├── server.py     # 261 路由 API 面
+│   │   ├── gateway.py    # 进程内分发：path -> service 调用（替代 server.py 路由）
 │   │   └── …             # auth/llm/assets/exploration/tasks/conversations/…
 │   └── ui/               # PySide6（对应原 web/）
 │       ├── app.py        # 登录/初始化 + 主窗口
 │       ├── sidebar.py    # 功能/系统两组导航
+│       ├── api_client.py # 进程内客户端（SSE 改为队列订阅）
 │       ├── graph_widget.py # 力导向图组件
 │       └── pages/        # 全部页面
 └── smoke_test.py         # 后端冒烟测试
@@ -35,8 +39,7 @@ pip install -r requirements.txt
 python main.py
 ```
 
-首次启动设置管理员密码，随后登录进入主界面（`http://127.0.0.1:8787` 后端已在
-进程内启动）。
+首次启动设置管理员密码，随后登录进入主界面（后端 services 已在进程内装配）。
 
 ## 配置 LLM
 

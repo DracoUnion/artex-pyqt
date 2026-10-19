@@ -1,16 +1,19 @@
-"""PySide6 API 客户端：HTTP + SSE 订阅。
+"""PySide6 API 客户端：进程内直接调用后端 services（无 HTTP/SSE）。
 
-对齐 web/lib/api.ts 的约定：Bearer token、401 全局登出、{error} 解析。
-SSE 用 QThread 读流，按事件发信号。
+替代原先的 HTTP + SSE 传输：ApiClient 直接走 gateway.dispatch，SSE 由
+进程内 queue（Broadcaster / LogSink）订阅驱动，经 QThread 桥接到 Qt 信号。
+对外保持原有接口面（get/post/put/patch/delete/upload + SseWorker/SseManager），
+页面无需改动。
 """
 from __future__ import annotations
 
-import json
+import os
 import queue
 from typing import Any, Optional
 
-import requests
 from PySide6.QtCore import QObject, QThread, Signal
+
+from ..backend.gateway import Gateway, GatewayError
 
 
 class ApiError(Exception):
@@ -21,10 +24,11 @@ class ApiError(Exception):
 
 
 class ApiClient:
-    def __init__(self, base_url: str):
-        self.base_url = base_url.rstrip("/")
+    """进程内客户端，直接分发到后端 services。"""
+
+    def __init__(self, gateway: Gateway):
+        self.gateway = gateway
         self._token: Optional[str] = None
-        self.session = requests.Session()
 
     def set_token(self, token: Optional[str]) -> None:
         self._token = token
@@ -33,27 +37,28 @@ class ApiClient:
     def token(self) -> Optional[str]:
         return self._token
 
+    # ---- 请求 ------------------------------------------------------
     def request(self, method: str, path: str, **kw) -> Any:
-        url = f"{self.base_url}{path}"
-        headers = dict(kw.pop("headers", {}) or {})
-        if self._token:
-            headers["Authorization"] = f"Bearer {self._token}"
+        params = dict(kw.pop("params", None) or {})
+        json_body = kw.pop("json", None)
+        files = kw.pop("files", {})
+        # 兼容形如 "/api/report?task=1" 的 path 内嵌 query
+        if "?" in path:
+            base, _, qs = path.partition("?")
+            for kv in qs.split("&"):
+                if "=" in kv:
+                    k, v = kv.split("=", 1)
+                    params.setdefault(k, v)
+            path = base
         try:
-            resp = self.session.request(method, url, headers=headers, timeout=kw.pop("timeout", 60), **kw)
-        except requests.RequestException as e:
-            raise ApiError(f"网络错误: {e}")
-        if resp.status_code == 401:
-            raise ApiError("未授权或登录已过期", 401)
-        ct = resp.headers.get("content-type", "")
-        if "json" in ct:
-            data = resp.json()
-        else:
-            return resp.text
-        if resp.status_code >= 400:
-            if isinstance(data, dict) and "error" in data:
-                raise ApiError(data["error"], resp.status_code)
-            raise ApiError(f"请求失败 ({resp.status_code})", resp.status_code)
-        return data
+            return self.gateway.dispatch(method, path, params=params, body=json_body, files=files)
+        except GatewayError as e:
+            raise ApiError(e.message, e.status)
+        except ValueError as e:
+            raise ApiError(str(e), 400)
+        except Exception as e:
+            self.gateway.logsink.error(f"API 异常 {method} {path}: {e}", tag="api")
+            raise ApiError(f"服务器内部错误: {e}", 500)
 
     def get(self, path: str, params: Optional[dict] = None, **kw) -> Any:
         return self.request("GET", path, params=params, **kw)
@@ -71,91 +76,95 @@ class ApiClient:
         return self.request("DELETE", path, **kw)
 
     def upload(self, path: str, file_path: str, field: str = "file", extra: Optional[dict] = None) -> Any:
-        url = f"{self.base_url}{path}"
-        headers = {"Authorization": f"Bearer {self._token}"} if self._token else {}
         with open(file_path, "rb") as f:
-            resp = self.session.post(url, headers=headers, files={field: f}, data=extra or {},
-                                     timeout=300)
-        if resp.status_code >= 400:
-            try:
-                d = resp.json()
-                raise ApiError(d.get("error", f"上传失败 ({resp.status_code})"), resp.status_code)
-            except ValueError:
-                raise ApiError(f"上传失败 ({resp.status_code})", resp.status_code)
-        try:
-            return resp.json()
-        except ValueError:
-            return {"ok": True}
+            content = f.read()
+        return self.request("POST", path, params=extra or {},
+                            files={"file": content, "filename": os.path.basename(file_path)})
 
 
 class SseWorker(QThread):
-    """SSE 订阅线程：连接、解析 data 帧、发信号、断线自动重连。"""
+    """进程内 SSE 替代：订阅 Broadcaster / LogSink 队列并桥接为信号。
+
+    emit: event(dict) 事件负载；status(str) connected / error。
+    停止通过 _running 标志 + 哨兵唤醒，避免线程永不退出。
+    """
 
     event = Signal(dict)
-    status = Signal(str)  # connected / disconnected / error
+    status = Signal(str)
+    _SENTINEL = object()
 
-    def __init__(self, client: ApiClient, path: str, params: Optional[dict] = None,
+    def __init__(self, gateway: Gateway, path: str, params: Optional[dict] = None,
                  parent: Optional[QObject] = None):
         super().__init__(parent)
-        self.client = client
-        self.path = path
-        self.params = params or {}
+        self.gateway = gateway
+        # 拆分 path 内嵌 query（如 "/api/.../stream?task=X"）
+        base_path, _, qs = (path or "").partition("?")
+        self.path = base_path
+        self.params = dict(params or {})
+        if qs:
+            for kv in qs.split("&"):
+                if "=" in kv:
+                    k, v = kv.split("=", 1)
+                    self.params.setdefault(k, v)
         self._running = True
-        self._last_event_id: Optional[str] = None
+        self._q: Optional[queue.Queue] = None
+        self._close = None
 
     def stop(self) -> None:
         self._running = False
+        if self._q is not None:
+            try:
+                self._q.put_nowait(self._SENTINEL)
+            except Exception:
+                pass
         self.wait(3000)
 
+    # 兼容旧接口：run 内首次连接后即置 connected
     def run(self) -> None:
-        while self._running:
+        try:
+            snapshot = self.gateway.stream_snapshot(self.path, self.params)
+            if self.path == "/api/exploration/activity/stream":
+                self.event.emit({"type": "snapshot", "items": snapshot.get("items", []),
+                                 "cursor": snapshot.get("cursor", 0)})
+            else:
+                for e in snapshot.get("items", []):
+                    self.event.emit(e)
+            # 订阅
             try:
-                self._connect_once()
-            except Exception as e:
-                if self._running:
-                    self.status.emit("error")
-            if self._running:
-                import time
-                time.sleep(1.5)  # 重连间隔
-
-    def _connect_once(self) -> None:
-        url = f"{self.client.base_url}{self.path}"
-        headers = {}
-        params = dict(self.params)
-        if self.client.token:
-            params["token"] = self.client.token
-        if self._last_event_id:
-            headers["Last-Event-ID"] = self._last_event_id
-        with requests.get(url, headers=headers, params=params, stream=True, timeout=(5, 3600)) as resp:
-            if resp.status_code == 401:
+                self._q, self._close = self.gateway.stream_subscribe(self.path, self.params)
+            except GatewayError:
                 self.status.emit("error")
                 return
             self.status.emit("connected")
-            buf = ""
-            for raw in resp.iter_lines(decode_unicode=True):
-                if not self._running:
-                    break
-                if raw is None:
-                    continue
-                if raw.startswith(":"):
-                    continue  # 心跳注释
-                if raw.startswith("id:"):
-                    self._last_event_id = raw[3:].strip()
-                    continue
-                if raw.startswith("data:"):
-                    buf += raw[5:].strip() + "\n"
-                    continue
-                if raw == "" and buf:
-                    try:
-                        payload = json.loads(buf)
-                    except Exception:
-                        payload = {"raw": buf}
-                    self.event.emit(payload)
-                    buf = ""
+            self._read_loop()
+        except Exception as e:
+            if self._running:
+                self.gateway.logsink.error(f"SSE {self.path}: {e}", tag="sse")
+                self.status.emit("error")
+
+    def _read_loop(self) -> None:
+        while self._running:
+            try:
+                ev = self._q.get(timeout=1.0)
+            except queue.Empty:
+                continue
+            if ev is self._SENTINEL or not self._running:
+                break
+            # activity 事件透传；页面按 seq 去重；logs 直接透传
+            self.event.emit(ev)
+        self._cleanup()
+
+    def _cleanup(self) -> None:
+        if self._close is not None:
+            try:
+                self._close()
+            except Exception:
+                pass
+            self._close = None
 
 
 class SseManager(QObject):
-    """管理多个 SseWorker，暴露统一事件流。"""
+    """管理多个 SseWorker，暴露统一事件流接口（页面沿用原用法）。"""
 
     def __init__(self, client: ApiClient, parent: Optional[QObject] = None):
         super().__init__(parent)
@@ -163,7 +172,7 @@ class SseManager(QObject):
         self._workers: dict[str, SseWorker] = {}
 
     def subscribe(self, key: str, path: str, params: Optional[dict] = None) -> SseWorker:
-        worker = SseWorker(self.client, path, params, self)
+        worker = SseWorker(self.client.gateway, path, params, self)
         self._workers[key] = worker
         worker.start()
         return worker

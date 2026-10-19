@@ -249,14 +249,14 @@ class TasksService:
             raise ValueError("任务不存在")
         cleanup = options or {}
         if cleanup.get("assets"):
-            # 摘除任务关联资产
+            # 摘除任务关联资产：重建 task_ids（json_each 无 pos 列，用 json_group_array 过滤）
             self.db.execute(
-                "UPDATE assets SET task_ids=json_remove(task_ids, '$[' || (SELECT pos FROM json_each(task_ids) WHERE value=?) || ']') "
+                "UPDATE assets SET task_ids=(SELECT json_group_array(value) FROM json_each(assets.task_ids) WHERE value<>?) "
                 "WHERE EXISTS (SELECT 1 FROM json_each(assets.task_ids) WHERE json_each.value=?)",
                 (str(tid), str(tid)),
             )
         if cleanup.get("traffic"):
-            self.db.execute("DELETE FROM traffic_exchanges WHERE task_ids LIKE ?", f"%{tid}%")
+            self.db.execute("DELETE FROM traffic_exchanges WHERE task_ids LIKE ?", (f"%{tid}%",))
         self.db.execute("DELETE FROM findings WHERE task_id=?", (tid,))
         self.db.execute("DELETE FROM task_scope WHERE task_id=?", (tid,))
         self.db.execute("DELETE FROM tasks WHERE id=?", (tid,))

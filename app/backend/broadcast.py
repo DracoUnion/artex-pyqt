@@ -1,7 +1,7 @@
 """进程内广播：Broadcaster（任务 activity pub/sub）+ 通用 SSE 辅助。
 
-订阅端跑在 uvicorn 事件循环线程；发布端来自引擎 worker 线程。
-用标准库 queue.Queue（线程安全）+ asyncio 侧 to_thread 轮询。
+订阅端跑在 PyQt 的 SseWorker 线程（queue.get）；发布端来自引擎 worker 线程。
+用标准库 queue.Queue（线程安全）+ 阻塞轮询。
 """
 from __future__ import annotations
 
