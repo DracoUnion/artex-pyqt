@@ -1,11 +1,11 @@
-"""侧边导航：功能 / 系统 两组 + 底部用户。"""
+"""侧边导航：功能 / 系统 两组。"""
 from __future__ import annotations
 
 from typing import Optional
 
 from PySide6.QtCore import Qt, QTimer
 from PySide6.QtWidgets import (
-    QButtonGroup, QFrame, QHBoxLayout, QLabel, QPushButton, QScrollArea, QVBoxLayout,
+    QButtonGroup, QFrame, QLabel, QPushButton, QScrollArea, QVBoxLayout,
     QWidget,
 )
 
@@ -69,7 +69,6 @@ class Sidebar(QFrame):
         lay.addWidget(scroll, 1)
 
         self._build_nav()
-        self._build_user()
 
     def _build_nav(self) -> None:
         self._group = QButtonGroup(self)
@@ -104,21 +103,6 @@ class Sidebar(QFrame):
                 btn.setText("📑  审批记录")
         except ApiError:
             pass
-
-    def _build_user(self) -> None:
-        bar = QFrame()
-        h = QHBoxLayout(bar)
-        h.setContentsMargins(12, 8, 12, 8)
-        u = QLabel("👤  ARTEX")
-        u.setStyleSheet("color: #8ea0b0; font-size: 12px;")
-        logout = QPushButton("退出")
-        logout.setObjectName("Ghost")
-        logout.setFixedWidth(40)
-        logout.clicked.connect(self.app.logout)
-        h.addWidget(u)
-        h.addStretch()
-        h.addWidget(logout)
-        self._nav_lay.addWidget(bar)
 
     def set_current(self, route: str) -> None:
         for r, btn in self._buttons.items():

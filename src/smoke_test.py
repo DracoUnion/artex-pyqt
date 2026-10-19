@@ -4,7 +4,7 @@ import sys
 import tempfile
 import time
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from services.gateway import Gateway, GatewayError
 
@@ -23,12 +23,6 @@ def call(method, path, params=None, json=None):
 
 
 print("health:", call("GET", "/api/health"))
-print("auth/status:", call("GET", "/api/auth/status"))
-
-tok = call("POST", "/api/auth/init", json={"password": "testpass123"})
-print("auth/init token?", "token" in (tok or {}))
-tok2 = call("POST", "/api/auth/login", json={"username": "ARTEX", "password": "testpass123"})
-print("auth/login token?", "token" in (tok2 or {}))
 
 agents = call("GET", "/api/agents")
 print("agents:", len(agents) if agents else None, [a["key"] for a in (agents or [])])

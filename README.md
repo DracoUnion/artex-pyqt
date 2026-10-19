@@ -4,30 +4,34 @@
 替代原「Go 后端 + Next.js 前端」架构。保留完整功能面：双图探索引擎、
 任务控制台、人在环路对话、流量录制、拦截审批、系统管理等。
 
-PyQt 直接调用后端 services 类（`services/gateway.py` 进程内分发），
-不再启动 HTTP 服务，无 FastAPI / uvicorn 依赖。
+PyQt 直接调用后端 services 类（`src/services/gateway.py` 进程内分发），
+不再启动 HTTP 服务，无 FastAPI / uvicorn 依赖，无登录/账号系统（直进主界面）。
 
 ## 架构
 
 ```
 standalone/
-├── main.py               # 入口：装配后端 services + Qt 主窗口
+├── src/                    # 全部源码
+│   ├── main.py             # 入口：装配后端 services + Qt 主窗口
+│   ├── services/           # SQLite services（对应原 server/）
+│   │   ├── schema.sql      # 从 PostgreSQL 双图 schema 移植
+│   │   ├── engine.py       # planner/worker 双图闭环（LLM 或演示模式）
+│   │   ├── gateway.py      # 进程内分发：path -> service 调用（替代 server.py 路由）
+│   │   └── …               # llm/assets/exploration/tasks/conversations/…
+│   ├── gui/                # PySide6（对应原 web/）
+│   │   ├── app.py          # 主窗口（无登录）
+│   │   ├── sidebar.py      # 功能/系统两组导航
+│   │   ├── api_client.py   # 进程内客户端（SSE 改为队列订阅）
+│   │   ├── graph_widget.py # 力导向图组件
+│   │   └── pages/          # 全部页面
+│   └── smoke_test.py       # 后端冒烟测试
+├── data/                   # 运行数据（SQLite、workspace、uploads）
+├── skills/                 # 技能目录
 ├── requirements.txt
-├── services/             # SQLite services（对应原 server/）
-│   ├── schema.sql        # 从 PostgreSQL 双图 schema 移植
-│   ├── engine.py         # planner/worker 双图闭环（LLM 或演示模式）
-│   ├── gateway.py        # 进程内分发：path -> service 调用（替代 server.py 路由）
-│   └── …                 # auth/llm/assets/exploration/tasks/conversations/…
-├── gui/                  # PySide6（对应原 web/）
-│   ├── app.py            # 登录/初始化 + 主窗口
-│   ├── sidebar.py        # 功能/系统两组导航
-│   ├── api_client.py     # 进程内客户端（SSE 改为队列订阅）
-│   ├── graph_widget.py   # 力导向图组件
-│   └── pages/            # 全部页面
-└── smoke_test.py         # 后端冒烟测试
+└── start.bat               # Windows 启动脚本
 ```
 
-- 后端数据存 `data/`（SQLite `artex.db`、`jwt.key`），技能目录 `skills/`。
+- 后端数据存 `data/`（SQLite `artex.db`），技能目录 `skills/`。
 - 流量录制代理监听 `127.0.0.1:8788`（系统设置可开关）。
 - 无 LLM Key 时引擎进入**演示模式**，可完整体验闭环。
 
@@ -35,10 +39,10 @@ standalone/
 
 ```bash
 pip install -r requirements.txt
-python main.py
+python src/main.py
 ```
 
-首次启动设置管理员密码，随后登录进入主界面（后端 services 已在进程内装配）。
+启动后直接进入主界面（后端 services 已在进程内装配，无需登录）。
 
 ## 配置 LLM
 

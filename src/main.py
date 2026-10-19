@@ -1,7 +1,7 @@
 """ARTEX Standalone 桌面应用入口。
 
-职责：直接装配后端 services（进程内，无 HTTP 服务）→ 主窗口 → 登录/首密设置 → 主界面。
-不再启动 uvicorn / FastAPI。
+职责：直接装配后端 services（进程内，无 HTTP 服务）→ 主窗口 → 主界面。
+不再启动 uvicorn / FastAPI，无登录/账号系统。
 """
 from __future__ import annotations
 
@@ -43,10 +43,12 @@ def main() -> None:
     client = ApiClient(gateway)
 
     from PySide6.QtWidgets import QApplication
-    from gui.app import ArtexApplication
+    from gui.app import ArtexApplication, apply_theme
 
     app = QApplication(sys.argv)
     app.setApplicationName("ARTEX")
+    apply_theme(app)
+
     window = ArtexApplication(client)
     window.show()
     code = app.exec()

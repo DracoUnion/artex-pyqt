@@ -12,7 +12,6 @@ from typing import Any, Optional
 
 from .agents import AgentsService
 from .assets import AssetsService
-from .auth import Auth
 from .broadcast import Broadcaster
 from .catalog import SkillsService, MCPService, ToolsService
 from .conversations import ConversationService
@@ -49,7 +48,6 @@ def settings_traffic_enabled(db) -> bool:
 
 def build_services(db: DB, logsink: LogSink, data_dir: str, skills_dir: str, broadcast: Broadcaster):
     """构造服务容器（对齐 server.py build_services）。"""
-    auth = Auth(data_dir)
     settings = SettingsService(db)
     llm = LLMService(db, logsink)
     agents = AgentsService(db, logsink)
@@ -81,7 +79,7 @@ def build_services(db: DB, logsink: LogSink, data_dir: str, skills_dir: str, bro
     notify = NotifyService(db, logsink)
     sync = SyncService(db, mcp, assets, logsink)
     return {
-        "auth": auth, "settings": settings, "llm": llm, "agents": agents,
+        "settings": settings, "llm": llm, "agents": agents,
         "tools": tools, "assets": assets, "tasks": tasks_svc, "exploration": exploration,
         "conversations": conversations, "intercept": intercept, "traffic": traffic,
         "workspace": workspace, "mcp": mcp, "skills": skills, "commands": commands,
@@ -172,34 +170,6 @@ class Gateway:
 
         # 统一挂件：无路径参数时匹配静态路径
         m = method.upper()
-
-        # ---- 认证 --------------------------------------------------
-        if m == "GET" and path == "/api/auth/status":
-            return {"initialized": svcs["auth"].initialized()}
-        if m == "POST" and path == "/api/auth/init":
-            auth_svc = svcs["auth"]
-            if auth_svc.initialized():
-                raise GatewayError("已初始化")
-            password = (body.get("password") or "")
-            if len(password) < 8:
-                raise GatewayError("密码至少 8 位")
-            auth_svc.init_password(password)
-            return {"token": auth_svc.sign_token()}
-        if m == "POST" and path == "/api/auth/login":
-            auth_svc = svcs["auth"]
-            if not auth_svc.initialized():
-                raise GatewayError("系统尚未初始化，请先设置密码")
-            username = body.get("username") or "ARTEX"
-            if str(username).upper() != "ARTEX":
-                raise GatewayError("用户名错误")
-            if not auth_svc.verify_password(body.get("password") or ""):
-                raise GatewayError("密码错误")
-            return {"token": auth_svc.sign_token()}
-        if m == "POST" and path == "/api/auth/change-password":
-            auth_svc = svcs["auth"]
-            if not auth_svc.change_password(body.get("old_password") or "", body.get("password") or ""):
-                raise GatewayError("旧密码错误")
-            return {"token": auth_svc.sign_token()}
 
         if m == "GET" and path == "/api/health":
             return {"status": "ok", "version": "standalone"}

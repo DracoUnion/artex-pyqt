@@ -28,14 +28,6 @@ class ApiClient:
 
     def __init__(self, gateway: Gateway):
         self.gateway = gateway
-        self._token: Optional[str] = None
-
-    def set_token(self, token: Optional[str]) -> None:
-        self._token = token
-
-    @property
-    def token(self) -> Optional[str]:
-        return self._token
 
     # ---- 请求 ------------------------------------------------------
     def request(self, method: str, path: str, **kw) -> Any:
