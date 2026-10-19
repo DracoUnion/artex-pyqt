@@ -6,7 +6,7 @@ import time
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from app.backend.gateway import Gateway, GatewayError
+from services.gateway import Gateway, GatewayError
 
 DATA_DIR = os.path.join(tempfile.mkdtemp(prefix="artex-test-"), "data")
 SKILLS_DIR = os.path.join(tempfile.mkdtemp(prefix="artex-test-"), "skills")

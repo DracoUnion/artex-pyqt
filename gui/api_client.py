@@ -13,7 +13,7 @@ from typing import Any, Optional
 
 from PySide6.QtCore import QObject, QThread, Signal
 
-from ..backend.gateway import Gateway, GatewayError
+from services.gateway import Gateway, GatewayError
 
 
 class ApiError(Exception):

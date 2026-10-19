@@ -4,7 +4,7 @@
 替代原「Go 后端 + Next.js 前端」架构。保留完整功能面：双图探索引擎、
 任务控制台、人在环路对话、流量录制、拦截审批、系统管理等。
 
-PyQt 直接调用后端 services 类（`app/backend/gateway.py` 进程内分发），
+PyQt 直接调用后端 services 类（`services/gateway.py` 进程内分发），
 不再启动 HTTP 服务，无 FastAPI / uvicorn 依赖。
 
 ## 架构
@@ -13,18 +13,17 @@ PyQt 直接调用后端 services 类（`app/backend/gateway.py` 进程内分发�
 standalone/
 ├── main.py               # 入口：装配后端 services + Qt 主窗口
 ├── requirements.txt
-├── app/
-│   ├── backend/          # SQLite services（对应原 server/）
-│   │   ├── schema.sql    # 从 PostgreSQL 双图 schema 移植
-│   │   ├── engine.py     # planner/worker 双图闭环（LLM 或演示模式）
-│   │   ├── gateway.py    # 进程内分发：path -> service 调用（替代 server.py 路由）
-│   │   └── …             # auth/llm/assets/exploration/tasks/conversations/…
-│   └── ui/               # PySide6（对应原 web/）
-│       ├── app.py        # 登录/初始化 + 主窗口
-│       ├── sidebar.py    # 功能/系统两组导航
-│       ├── api_client.py # 进程内客户端（SSE 改为队列订阅）
-│       ├── graph_widget.py # 力导向图组件
-│       └── pages/        # 全部页面
+├── services/             # SQLite services（对应原 server/）
+│   ├── schema.sql        # 从 PostgreSQL 双图 schema 移植
+│   ├── engine.py         # planner/worker 双图闭环（LLM 或演示模式）
+│   ├── gateway.py        # 进程内分发：path -> service 调用（替代 server.py 路由）
+│   └── …                 # auth/llm/assets/exploration/tasks/conversations/…
+├── gui/                  # PySide6（对应原 web/）
+│   ├── app.py            # 登录/初始化 + 主窗口
+│   ├── sidebar.py        # 功能/系统两组导航
+│   ├── api_client.py     # 进程内客户端（SSE 改为队列订阅）
+│   ├── graph_widget.py   # 力导向图组件
+│   └── pages/            # 全部页面
 └── smoke_test.py         # 后端冒烟测试
 ```
 

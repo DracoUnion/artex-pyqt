@@ -36,14 +36,14 @@ def main() -> None:
         except Exception:
             pass
 
-    from app.backend.gateway import Gateway
-    from app.ui.api_client import ApiClient
+    from services.gateway import Gateway
+    from gui.api_client import ApiClient
 
     gateway = Gateway(str(app_data_dir()), str(skills_dir()))
     client = ApiClient(gateway)
 
     from PySide6.QtWidgets import QApplication
-    from app.ui.app import ArtexApplication
+    from gui.app import ArtexApplication
 
     app = QApplication(sys.argv)
     app.setApplicationName("ARTEX")
