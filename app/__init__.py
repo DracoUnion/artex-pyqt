@@ -1,0 +1,1 @@
+"""ARTEX standalone。"""
