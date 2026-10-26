@@ -13,6 +13,7 @@ from typing import Any, Optional
 import requests
 
 from .db import DB, get
+from .openai import OpenAIClient
 from .util import now, sid
 
 
@@ -244,86 +245,60 @@ class LLMService:
 
     def _chat_completion(self, cfg: dict, prompt: str, max_tokens: int = 0,
                          timeout: int = 120, session_id: str = "", model: Optional[str] = None) -> dict:
-        """同步非流式调用。返回 {content, input_tokens, output_tokens}。"""
+        """同步非流式调用，统一走 OpenAIClient。返回 {content, input_tokens, output_tokens}。"""
         fmt = cfg.get("format") or "openai"
         api_key = cfg.get("api_key") or ""
-        base_url = (cfg.get("base_url") or "").rstrip("/")
+        base_url = (cfg.get("base_url") or "").rstrip("/") or None
         proxy = cfg.get("proxy") or None
         mdl = model or cfg.get("model") or "gpt-4o-mini"
-        mt = max_tokens or int(cfg.get("max_tokens") or 0)
-        headers = {"Authorization": f"Bearer {api_key}"}
-        if session_id and cfg.get("session_header_key"):
-            headers[cfg["session_header_key"]] = session_id
-        proxies = {"http": proxy, "https": proxy} if proxy else None
+        mt = max_tokens or int(cfg.get("max_tokens") or 0) or None
         request_id = f"{int(time.time()*1000)}-{threading.get_ident()}"
 
-        if fmt == "anthropic":
-            url = f"{base_url or 'https://api.anthropic.com'}/v1/messages"
-            body: dict[str, Any] = {
-                "model": mdl,
-                "max_tokens": mt or 1024,
-                "messages": [{"role": "user", "content": prompt}],
-            }
-            headers["x-api-key"] = api_key
-            headers["anthropic-version"] = "2023-06-01"
-            if cfg.get("thinking_type") == "enabled":
-                body["thinking"] = {"type": "enabled", "budget_tokens": 4096}
-            resp = requests.post(url, json=body, headers=headers, timeout=timeout, proxies=proxies)
-            if resp.status_code != 200:
-                raise RuntimeError(f"Anthropic {resp.status_code}: {resp.text[:200]}")
-            data0 = resp.json()
-            content = "".join(b.get("text", "") for b in data0.get("content", []) if b.get("type") == "text")
-            usage = data0.get("usage", {})
-            in_t = usage.get("input_tokens", 0); out_t = usage.get("output_tokens", 0)
-        else:  # openai / openai-responses
-            if fmt == "openai-responses":
-                url = f"{base_url or 'https://api.openai.com/v1'}/responses"
-                body = {
-                    "model": mdl,
-                    "input": prompt,
-                    "max_output_tokens": mt or 1024,
-                }
-                resp = requests.post(url, json=body, headers=headers, timeout=timeout, proxies=proxies)
-                if resp.status_code != 200:
-                    raise RuntimeError(f"OpenAI {resp.status_code}: {resp.text[:200]}")
-                data0 = resp.json()
-                content = "".join(
-                    item.get("text", "")
-                    for item in data0.get("output", [])
-                    if item.get("type") == "message"
-                )
-                usage = data0.get("usage", {})
-                in_t = usage.get("input_tokens", 0); out_t = usage.get("output_tokens", 0)
-            else:
-                url = f"{base_url or 'https://api.openai.com/v1'}/chat/completions"
-                body = {
-                    "model": mdl,
-                    "messages": [{"role": "user", "content": prompt}],
-                }
-                if mt:
-                    field = "max_completion_tokens" if cfg.get("max_tokens_field") == "max_completion_tokens" else "max_tokens"
-                    body[field] = mt
-                if cfg.get("thinking_type") == "enabled":
-                    body["reasoning_effort"] = cfg.get("reasoning_effort") or "medium"
-                resp = requests.post(url, json=body, headers=headers, timeout=timeout, proxies=proxies)
-                if resp.status_code != 200:
-                    raise RuntimeError(f"OpenAI {resp.status_code}: {resp.text[:200]}")
-                data0 = resp.json()
-                content = data0.get("choices", [{}])[0].get("message", {}).get("content", "") or ""
-                usage = data0.get("usage", {})
-                in_t = usage.get("prompt_tokens", 0); out_t = usage.get("completion_tokens", 0)
+        # 会话头（如 claude-code 需要按 session 区分上下文）
+        extra_headers = {}
+        if session_id and cfg.get("session_header_key"):
+            extra_headers[cfg["session_header_key"]] = session_id
+
+        # 思考配置：Anthropic 走 thinking 结构，OpenAI 兼容走 reasoning_effort
+        extra_body = {}
+        if cfg.get("thinking_type") == "enabled":
+            if fmt == "anthropic":
+                extra_body["thinking"] = {"type": "enabled", "budget_tokens": 4096}
+            elif fmt == "openai":
+                extra_body["reasoning_effort"] = cfg.get("reasoning_effort") or "medium"
+
+        client = OpenAIClient(
+            api_key=api_key,
+            base_url=base_url,
+            user_agent="artex-pyqt/1.0",
+            timeout=timeout,
+            format=fmt,
+            proxy=proxy,
+            max_tokens_field=cfg.get("max_tokens_field") or "max_tokens",
+            extra_headers=extra_headers or None,
+        )
+        ans, usage = client.call_llm(
+            [{"role": "user", "content": prompt}],
+            mdl,
+            max_tokens=mt,
+            extra_body=extra_body,
+            return_usage=True,
+        )
+        in_t = usage.get("prompt_tokens") or usage.get("input_tokens") or 0
+        out_t = usage.get("completion_tokens") or usage.get("output_tokens") or 0
         self._record_usage(request_id, mdl, in_t, out_t, session_id)
-        return {"content": content, "input_tokens": in_t, "output_tokens": out_t}
+        return {"content": ans, "input_tokens": in_t, "output_tokens": out_t}
 
     # ------------------------------------------------------------------
     # token 记账（llm_usage 等价物）
     # ------------------------------------------------------------------
     def _record_usage(self, request_id: str, model: str, in_t: int, out_t: int, session_id: str) -> None:
         try:
+            ts = now()
             self.db.execute(
-                "INSERT INTO llm_usage(id, model, session_id, input_tokens, output_tokens, created_at) "
-                "VALUES(?,?,?,?,?,?)",
-                (request_id, model, session_id or "", int(in_t or 0), int(out_t or 0), now()),
+                "INSERT INTO llm_usage(id, model, session_id, input_tokens, output_tokens, started_at, created_at) "
+                "VALUES(?,?,?,?,?,?,?)",
+                (request_id, model, session_id or "", int(in_t or 0), int(out_t or 0), ts, ts),
             )
         except Exception:
             pass
