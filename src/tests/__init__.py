@@ -1,0 +1,1 @@
+"""ARTEX tests package."""

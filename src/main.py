@@ -1,6 +1,6 @@
 """ARTEX Standalone 桌面应用入口。
 
-职责：直接装配后端 services（进程内，无 HTTP 服务）→ 主窗口 → 主界面。
+职责：bootstrap 装配后端 services（进程内，无 HTTP 服务）→ 主窗口 → 主界面。
 不再启动 uvicorn / FastAPI，无登录/账号系统。
 """
 from __future__ import annotations
@@ -8,6 +8,8 @@ from __future__ import annotations
 import os
 import sys
 from pathlib import Path
+
+from bootstrap import build_context
 
 
 def base_dir() -> Path:
@@ -36,10 +38,13 @@ def main() -> None:
         except Exception:
             pass
 
-    from services.gateway import Gateway
     from gui.api_client import ApiClient
 
-    gateway = Gateway(str(app_data_dir()), str(skills_dir()))
+    ctx = build_context(
+        data_dir=str(app_data_dir()),
+        skills_dir=str(skills_dir()),
+    )
+    gateway = ctx.gateway
     client = ApiClient(gateway)
 
     from PySide6.QtWidgets import QApplication
@@ -53,6 +58,7 @@ def main() -> None:
     window.show()
     code = app.exec()
     gateway.close()
+    ctx.tasks.shutdown()
     sys.exit(code)
 
 
