@@ -16,6 +16,22 @@ from PySide6.QtCore import QObject, QThread, Signal
 from services.gateway import Gateway, GatewayError
 
 
+# 所有存活的 SseWorker 注册表：应用退出前统一停止，
+# 避免 QThread 在运行中被销毁触发 Qt abort（0xC0000409）。
+_ALL_WORKERS: set["SseWorker"] = set()
+
+
+def shutdown_all_sse() -> None:
+    """停止全部存活 SSE 工作线程（应用退出清理用）。"""
+    for w in list(_ALL_WORKERS):
+        try:
+            if w.isRunning():
+                w.stop()
+        except Exception:
+            pass
+    _ALL_WORKERS.clear()
+
+
 class ApiError(Exception):
     def __init__(self, message: str, status: int = 0):
         super().__init__(message)
@@ -101,6 +117,7 @@ class SseWorker(QThread):
         self._running = True
         self._q: Optional[queue.Queue] = None
         self._close = None
+        _ALL_WORKERS.add(self)
 
     def stop(self) -> None:
         self._running = False
@@ -110,6 +127,7 @@ class SseWorker(QThread):
             except Exception:
                 pass
         self.wait(3000)
+        _ALL_WORKERS.discard(self)
 
     # 兼容旧接口：run 内首次连接后即置 connected
     def run(self) -> None:

@@ -63,6 +63,16 @@ class SystemLogsPage(BasePage):
         worker.event.connect(self._on_sse)
         self._load_history()
 
+    def stop_sse(self) -> None:
+        """页面销毁前停止 SSE 工作线程，避免 QThread 运行中销毁。"""
+        if self._sse:
+            self._sse.shutdown()
+            self._sse = None
+
+    def closeEvent(self, event) -> None:
+        self.stop_sse()
+        super().closeEvent(event)
+
     def _load_history(self) -> None:
         try:
             r = self.client.get("/api/logs/history", params={"before": 2 ** 62, "limit": 300})

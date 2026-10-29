@@ -57,6 +57,10 @@ def main() -> None:
     window = ArtexApplication(client)
     window.show()
     code = app.exec()
+    # 停止页面遗留的 SSE 工作线程（后端日志页等），避免 QThread 在退出时
+    # 仍处于运行状态触发 Qt abort（0xC0000409）。
+    from gui.api_client import shutdown_all_sse
+    shutdown_all_sse()
     gateway.close()
     ctx.tasks.shutdown()
     sys.exit(code)

@@ -7,6 +7,8 @@ from PySide6.QtWidgets import (
     QPushButton, QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget,
 )
 
+from PySide6.QtGui import QColor
+
 from ...api_client import ApiError
 from ...theme import COL
 from ...widgets import (
@@ -90,7 +92,7 @@ class OverviewTab(QWidget):
         for g in goals:
             item = QListWidgetItem(f"{g['text']}  [{g['state']}]")
             item.setData(Qt.UserRole, g["id"])
-            item.setForeground(COL["text"] if g["state"] == "open" else COL["ok"])
+            item.setForeground(QColor(COL["text"] if g["state"] == "open" else COL["ok"]))
             self.goal_list.addItem(item)
 
     def _add_goal(self) -> None:

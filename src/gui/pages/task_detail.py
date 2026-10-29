@@ -121,6 +121,13 @@ class TaskDetailDialog(QDialog):
 
     def closeEvent(self, event) -> None:
         self._timer.stop()
-        for t in getattr(self, "_tab_timers", []):
-            t.stop()
+        # 停止各 Tab 的后台线程/定时器（SessionsTab 的 SSE 工作线程等），
+        # 避免 QThread 在运行中被销毁触发 Qt abort（0xC0000409）。
+        for i in range(self.tabs.count()):
+            tab = self.tabs.widget(i)
+            if hasattr(tab, "stop"):
+                try:
+                    tab.stop()
+                except Exception:
+                    pass
         super().closeEvent(event)
